@@ -2,70 +2,70 @@ namespace Vidarls.Lego
 open System
 
 type  ArgumentSize =
-| Byte = 0x81 // 1 byte
-| Short = 0x82 // 2 bytes
-| Int = 0x83 // 4 bytes
-| String = 0x84
+| Byte = 0x81uy // 1 byte
+| Short = 0x82uy // 2 bytes
+| Int = 0x83uy // 4 bytes
+| String = 0x84uy
 
 type ReplyType =
-| DirectReply = 0x02
-| SystemReply = 0x03
-| DirectReplyError = 0x04
-| SystenReplyError = 0x05
+| DirectReply = 0x02uy
+| SystemReply = 0x03uy
+| DirectReplyError = 0x04uy
+| SystenReplyError = 0x05uy
 
 type Opcode =
-| UIReadGetFirmware = 0x810A
-| UIWriteLED = 0x821B
-| UIButtonPressed = 0x8309
-| UIDrawUpdate = 0x8400
-| UIDrawClean = 0x8401
-| UIDrawPixel = 0x8402
-| UIDrawLine = 0x8403
-| UIDrawCircle = 0x8404
-| UIDrawText = 0x8405
-| UIDrawFillRect = 0x8409
-| UIDrawRect = 0x840a
-| UIDrawInverseRect = 0x8410
-| UIDrawSelectFont = 0x8411
-| UIDrawTopline = 0x8412
-| UIDrawFillWindow = 0x8413
-| UIDrawDotLine = 0x8415
-| UIDrawFillCircle = 0x8418
-| UIDrawBmpFile = 0x841c
+| UIReadGetFirmware = 0x810Aus
+| UIWriteLED = 0x821Bus
+| UIButtonPressed = 0x8309us
+| UIDrawUpdate = 0x8400us
+| UIDrawClean = 0x8401us
+| UIDrawPixel = 0x8402us
+| UIDrawLine = 0x8403us
+| UIDrawCircle = 0x8404us
+| UIDrawText = 0x8405us
+| UIDrawFillRect = 0x8409us
+| UIDrawRect = 0x840aus
+| UIDrawInverseRect = 0x8410us
+| UIDrawSelectFont = 0x8411us
+| UIDrawTopline = 0x8412us
+| UIDrawFillWindow = 0x8413us
+| UIDrawDotLine = 0x8415us
+| UIDrawFillCircle = 0x8418us
+| UIDrawBmpFile = 0x841cus
 
-| SoundBreak = 0x9400
-| SoundTone = 0x9401
-| SoundPlay = 0x9402
-| SoundRepeat = 0x9403
-| SoundService = 0x9404
+| SoundBreak = 0x9400us
+| SoundTone = 0x9401us
+| SoundPlay = 0x9402us
+| SoundRepeat = 0x9403us
+| SoundService = 0x9404us
 
-| InputDeviceGetTypeMode = 0x9905
-| InputDeviceGetDeviceName = 0x9915
-| InputDeviceGetModeName = 0x9916
-| InputDeviceReadyPct = 0x991b
-| InputDeviceReadyRaw = 0x991c
-| InputDeviceReadySI = 0x991d
-| InputDeviceClearAll = 0x990a
-| InputDeviceClearChanges = 0x991a
+| InputDeviceGetTypeMode = 0x9905us
+| InputDeviceGetDeviceName = 0x9915us
+| InputDeviceGetModeName = 0x9916us
+| InputDeviceReadyPct = 0x991bus
+| InputDeviceReadyRaw = 0x991cus
+| InputDeviceReadySI = 0x991dus
+| InputDeviceClearAll = 0x990aus
+| InputDeviceClearChanges = 0x991aus
 
-| InputRead = 0x9a
-| InputReadExt = 0x9e
-| InputReadSI = 0x9d
+| InputRead = 0x9aus
+| InputReadExt = 0x9eus
+| InputReadSI = 0x9dus
 
-| OutputStop = 0xa3
-| OutputPower = 0xa4
-| OutputSpeed = 0xa5
-| OutputStart = 0xa6
-| OutputPolarity = 0xa7
-| OutputReady = 0xaa
-| OutputStepPower = 0xac
-| OutputTimePower = 0xad
-| OutputStepSpeed = 0xae
-| OutputTimeSpeed = 0xaf
-| OutputStepSync = 0xb0
-| OutputTimeSync = 0xb1
+| OutputStop = 0xa3us
+| OutputPower = 0xa4us
+| OutputSpeed = 0xa5us
+| OutputStart = 0xa6us
+| OutputPolarity = 0xa7us
+| OutputReady = 0xaaus
+| OutputStepPower = 0xacus
+| OutputTimePower = 0xadus
+| OutputStepSpeed = 0xaeus
+| OutputTimeSpeed = 0xafus
+| OutputStepSync = 0xb0us
+| OutputTimeSync = 0xb1us
 
-| Tst = 0xff
+| Tst = 0xffus
 
 type SystemOpcode =
 | BeginDownload = 0x92
@@ -92,13 +92,13 @@ type SystemReplyStatus =
 /// Type of command to send to the brick
 type CommandType =
 /// Direct caommand with a reply expected
-| DirectReply = 0x00
+| DirectReply = 0x00uy
 /// Direct command with no reply
-| DirectNoReply = 0x80
+| DirectNoReply = 0x80uy
 /// System command with a reply expected
-| SystemReply = 0x01
+| SystemReply = 0x01uy
 /// System command with no reply
-| SystemNoReply = 0x81
+| SystemNoReply = 0x81uy
 
 /// Format of sensor data
 type Format =
