@@ -51,9 +51,6 @@ type ``Protocol tests`` (output:ITestOutputHelper) =
         let sequenceNumber = message |> Protocol.getMessageSequenceNumber
         sequenceNumber |> should equal (Some(44444us))
 
-    
-
-
     [<Fact>]
     member __.``Can receive complete message smaller than buffer size`` () =
         let message = Array.zeroCreate 500
@@ -176,28 +173,39 @@ type ``Protocol tests`` (output:ITestOutputHelper) =
         let result = Protocol.ReceiveActions.StopReceive |> receiver.PostAndReply
         result |> should equal Protocol.ActionResult.Success
 
-    [<Fact>]
-    member __.``Coordinator incresases message sequence number by 1 for each message`` () =
+    [<Theory>]
+    [<InlineData(1,1us)>]
+    [<InlineData(2,2us)>]
+    [<InlineData(100,100us)>]
+    [<InlineData(65535, 65535us)>]
+    [<InlineData(65536, 1us)>]
+    [<InlineData(65537, 2us)>]
+    [<InlineData(131070,65535us)>]
+    [<InlineData(131071, 1us)>]
+    member __.``Coordinator increases message count by 1 for each message, retarts 65535`` (numberOfMessagesToSend:int) (expectedCount:uint16) =
         let e = (new System.Threading.AutoResetEvent(false))
         let mutable result = Protocol.SendActions.Send [||]
-        let sendAction = (fun (a:Protocol.SendActions) -> 
+        
+        let mutable counter = 0
+        let sendAction = (fun (a:Protocol.SendActions) ->
             result <- a
-            e.Set () |> ignore
-            )
+            counter <- counter + 1
+            if counter = (numberOfMessagesToSend) then e.Set () |> ignore)
+
         let coord = Protocol.coordinator sendAction ignore
-        Protocol.CoordinatorActions.Send (Array.zeroCreate 8)
-        |> coord.Post
+        
+        for i = 1 to numberOfMessagesToSend do
+            Protocol.CoordinatorActions.Send (Array.zeroCreate 8)
+            |> coord.Post
+
         e.WaitOne () |> ignore
-        Protocol.CoordinatorActions.Send (Array.zeroCreate 8)
-        |> coord.Post
-        e.WaitOne () |> ignore
+       
         match result with
         | Protocol.SendActions.Send bytes ->
             let messageSequence = bytes |> Protocol.getMessageSequenceNumber
-            messageSequence |> should equal (Some 2us)
-        | _ -> failwith "Wrong type given"
-
-
+            messageSequence |> should equal (Some expectedCount)
+        | _ -> failwith "unexpected messagetype"
+        
 
         
 

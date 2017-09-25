@@ -131,11 +131,17 @@ module Protocol =
 
     let coordinator (send:SendActions->unit) replyReceived = MailboxProcessor.Start(fun inbox -> 
         let bufferSize = 2048
+        let rec increaseMessageCount count =
+            if count = System.UInt16.MaxValue then 
+                increaseMessageCount 0us
+            else
+                count + 1us
+
         let rec messageloop count = async {
             let! msg = inbox.Receive ()
             match msg with
             | Send bytes ->
-                let newCount = count + 1us
+                let newCount = count |> increaseMessageCount
                 bytes |> setMessageSequenceNumber newCount
                 SendActions.Send bytes |> send
                 return! messageloop newCount
