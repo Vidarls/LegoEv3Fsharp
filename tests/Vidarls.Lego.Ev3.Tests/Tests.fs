@@ -18,7 +18,7 @@ type FakeSerialPort () =
             stream.Position <- stream.Position - (data |> Array.length |> int64)
 
 type ``Protocol tests`` (output:ITestOutputHelper) =
-    let toneString = "0F 00 03 00 80 00 00 94 01 81 4B 82 E8 03 82 2C 01"
+    let toneString = "0F 00 FF FF 80 00 00 94 01 81 4B 82 E8 03 82 2C 01"
     let toneStringNoHeaders = "94 01 81 4B 82 E8 03 82 2C 01"
 
     let stringToByteArray (s:string) =
@@ -28,11 +28,12 @@ type ``Protocol tests`` (output:ITestOutputHelper) =
     [<Fact>]
     member __. ``Can convert tone command to byte array`` () =
         let expected = toneString |> stringToByteArray
-        use p = (new Protocol.Payload (CommandType.DirectNoReply))
-        PlayTone(Volume 75uy, Frequency 1000us, Duration 300us)
-        |> Protocol.PlayTone p
+        
+        let result = 
+            PlayTone(Volume 75uy, Frequency 1000us, Duration 300us)
+            |> Protocol.prepareCommand
+            |> (function | Protocol.OutgoingMessage.Prepared (_,bytes) -> bytes | _ -> failwith "unexpected type")
 
-        let result = p.ToBytes 3us
         output.WriteLine (sprintf "%A" expected)
         output.WriteLine (sprintf "%A" result)        
         Assert.Equal<byte []> (expected, result)
@@ -40,25 +41,25 @@ type ``Protocol tests`` (output:ITestOutputHelper) =
     [<Fact>]
     member __.``Can set and retrieve message length`` () = 
         let message = Array.zeroCreate 1024 //expected message length + 2 bytes for message length
-        message |> Protocol.setMessageLength
-        let length = message |> Protocol.getMessageLenght
+        message |> Protocol.MessageWriter.setMessageLength
+        let length = message |> Protocol.MessageReader.getMessageLenght
         length |> should equal (Some 1022us)
 
     [<Fact>]
     member __.``Can set and retrieve message sequence number`` () =
         let message = Array.zeroCreate 1024
-        message |> Protocol.setMessageSequenceNumber 44444us
-        let sequenceNumber = message |> Protocol.getMessageSequenceNumber
+        message |> Protocol.MessageWriter.setMessageSequenceNumber 44444us
+        let sequenceNumber = message |> Protocol.MessageReader.getMessageSequenceNumber
         sequenceNumber |> should equal (Some(44444us))
 
     [<Fact>]
     member __.``Can receive complete message smaller than buffer size`` () =
         let message = Array.zeroCreate 500
-        message |> Protocol.setMessageLength
+        message |> Protocol.MessageWriter.setMessageLength
 
         let fakePort = (new FakeSerialPort ()) 
 
-        let mutable result = Protocol.WireMessage.Partial([||])
+        let mutable result = Protocol.IncomingWireMessage.Partial([||])
         let e = (new System.Threading.AutoResetEvent(false))
         let receiveHandler = 
             (fun msg -> 
@@ -71,86 +72,86 @@ type ``Protocol tests`` (output:ITestOutputHelper) =
         Protocol.ReceiveActions.StartReceive |> receiver.Post
         e.WaitOne () |> ignore
         
-        result |> should equal (Protocol.WireMessage.Complete message)
+        result |> should equal (Protocol.IncomingWireMessage.Complete message)
 
     [<Fact>]
     member __.``Can correctly split a byte array into completed and incomplete parts (Incomplete message size)`` () =
         let message = Array.zeroCreate 1
-        let (complete, incomplete) = message |> Protocol.evaulateMessageCompleteness []
+        let (complete, incomplete) = message |> Protocol.MessageReader.evaulateMessageCompleteness []
         complete |> should be Empty
-        incomplete |> should equal (Some(Protocol.WireMessage.Partial message))
+        incomplete |> should equal (Some(Protocol.IncomingWireMessage.Partial message))
 
     [<Fact>]
     member __.``Can correctly split a byte array into completed and incomplete parts (Message size ok, incomplete message)`` () =
         let message = Array.zeroCreate 4
-        message |> Protocol.setMessageLength
+        message |> Protocol.MessageWriter.setMessageLength
         let incompleteMessage = message |> Array.take 3
 
-        let (complete, incomplete) = incompleteMessage |> Protocol.evaulateMessageCompleteness []
+        let (complete, incomplete) = incompleteMessage |> Protocol.MessageReader.evaulateMessageCompleteness []
         complete |> should be Empty
-        incomplete |> should equal (Some(Protocol.WireMessage.Partial incompleteMessage)) 
+        incomplete |> should equal (Some(Protocol.IncomingWireMessage.Partial incompleteMessage)) 
 
     [<Fact>]
     member __.``Can correctly split a byte array into completed and incomplete parts (Message size ok, exact message size)`` () =
         let message = Array.zeroCreate 4
-        message |> Protocol.setMessageLength
+        message |> Protocol.MessageWriter.setMessageLength
 
-        let (complete, incomplete) = message |> Protocol.evaulateMessageCompleteness []
+        let (complete, incomplete) = message |> Protocol.MessageReader.evaulateMessageCompleteness []
 
-        complete |> should equal [Protocol.WireMessage.Complete(message)]
+        complete |> should equal [Protocol.IncomingWireMessage.Complete(message)]
         incomplete |> should equal None
 
     [<Fact>]
     member __.``Can correctly split a byte array into completed and incomplete parts (One complete, one partial)`` () =
         let message1 = Array.zeroCreate 4
-        message1 |> Protocol.setMessageLength
+        message1 |> Protocol.MessageWriter.setMessageLength
         let message2 = Array.zeroCreate 4
-        message2 |> Protocol.setMessageLength
+        message2 |> Protocol.MessageWriter.setMessageLength
 
         let message = Array.append message1 (message2 |> Array.take 3)
 
-        let (complete, incomplete) = message |> Protocol.evaulateMessageCompleteness []
-        complete |> should equal [Protocol.WireMessage.Complete message1]
-        incomplete |> should equal (Some(Protocol.WireMessage.Partial (message2 |> Array.take 3))) 
+        let (complete, incomplete) = message |> Protocol.MessageReader.evaulateMessageCompleteness []
+        complete |> should equal [Protocol.IncomingWireMessage.Complete message1]
+        incomplete |> should equal (Some(Protocol.IncomingWireMessage.Partial (message2 |> Array.take 3))) 
 
     [<Fact>]
     member __.``Can correctly split a byte array into completed and incomplete parts (Two complete, zero partial)`` () =
         let message1 = Array.zeroCreate 4
-        message1 |> Protocol.setMessageLength
+        message1 |> Protocol.MessageWriter.setMessageLength
         let message2 = Array.zeroCreate 4
-        message2 |> Protocol.setMessageLength
+        message2 |> Protocol.MessageWriter.setMessageLength
 
         let message = Array.append message1 message2
 
-        let (complete, incomplete) = message |> Protocol.evaulateMessageCompleteness []
-        complete |> should equal [Protocol.WireMessage.Complete message1; Protocol.WireMessage.Complete message2 ]
+        let (complete, incomplete) = message |> Protocol.MessageReader.evaulateMessageCompleteness []
+        complete |> should equal [Protocol.IncomingWireMessage.Complete message1; Protocol.IncomingWireMessage.Complete message2 ]
         incomplete |> should equal None 
 
     [<Fact>]
     member __.``Can correctly split a byte array into completed and incomplete parts (Two complete, 1 partial)`` () =
         let message1 = Array.zeroCreate 4
-        message1 |> Protocol.setMessageLength
+        message1 |> Protocol.MessageWriter.setMessageLength
         let message2 = Array.zeroCreate 4
-        message2 |> Protocol.setMessageLength
+        message2 |> Protocol.MessageWriter.setMessageLength
         let message3 = Array.zeroCreate 4
-        message3 |> Protocol.setMessageLength
+        message3 |> Protocol.MessageWriter.setMessageLength
         let incompleteMessage3 = message3 |> Array.take 3
 
         let message = Array.append (Array.append message1 message2) incompleteMessage3
 
-        let (complete, incomplete) = message |> Protocol.evaulateMessageCompleteness []
+        let (complete, incomplete) = message |> Protocol.MessageReader.evaulateMessageCompleteness []
 
-        complete |> should equal [Protocol.WireMessage.Complete message1; Protocol.WireMessage.Complete message2 ]
-        incomplete |> should equal (Some(Protocol.WireMessage.Partial incompleteMessage3))
+        complete |> should equal [Protocol.IncomingWireMessage.Complete message1; Protocol.IncomingWireMessage.Complete message2 ]
+        incomplete |> should equal (Some(Protocol.IncomingWireMessage.Partial incompleteMessage3))
         
     [<Fact>]
     member __.``Can receive complete message larger than buffer size`` () =
         let message = Array.zeroCreate 2100
-        message |> Protocol.setMessageLength
+        message |> Protocol.MessageWriter.setMessageLength
 
         let fakePort = (new FakeSerialPort ()) 
 
-        let mutable result = Protocol.WireMessage.Partial([||])
+        let mutable result = Protocol.IncomingWireMessage.Partial([||])
         let e = (new System.Threading.AutoResetEvent(false))
         let receiveHandler = 
             (fun msg -> 
@@ -163,7 +164,7 @@ type ``Protocol tests`` (output:ITestOutputHelper) =
         Protocol.ReceiveActions.StartReceive |> receiver.Post
         e.WaitOne () |> ignore
         
-        result |> should equal (Protocol.WireMessage.Complete message)
+        result |> should equal (Protocol.IncomingWireMessage.Complete message)
 
     [<Fact>]
     member __.``Can stop receiving`` () =
@@ -202,9 +203,12 @@ type ``Protocol tests`` (output:ITestOutputHelper) =
        
         match result with
         | Protocol.SendActions.Send bytes ->
-            let messageSequence = bytes |> Protocol.getMessageSequenceNumber
+            let messageSequence = bytes |> Protocol.MessageReader.getMessageSequenceNumber
             messageSequence |> should equal (Some expectedCount)
         | _ -> failwith "unexpected messagetype"
+
+    //member __.``Can receive response to query`` () =
+
         
 
         

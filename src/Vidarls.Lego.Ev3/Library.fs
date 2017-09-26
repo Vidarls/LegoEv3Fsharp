@@ -10,13 +10,27 @@ type Commands =
 | PlayTone of Volume * Frequency * Duration
 
 type Queries =
-| GetTypeAndMode of InputPort
+| GetTypeAndMode of InputPort 
+
+
 
 [<RequireQualifiedAccess>]
 module Protocol =
-    type WireMessage =
+    type IncomingWireMessage =
     | Partial of byte []
     | Complete of byte []
+
+    type ResponseOffset = ResponseOffset of uint16
+    type ResponseLength = ResponseLength of uint16
+    type SentSequenceNumber = SentSequenceNumber of uint16
+
+    type OutgoingMessageData = 
+    | Commands of Commands list
+    | Queries of (Queries * ResponseOffset * ResponseLength) list
+    
+    type OutgoingMessage =
+    | Prepared of OutgoingMessageData * byte []
+    | Sent of OutgoingMessageData * SentSequenceNumber
 
     type ActionResult =
     | Success
@@ -32,99 +46,111 @@ module Protocol =
     | CheckReceived of byte []
     | StopReceive of AsyncReplyChannel<ActionResult>
 
-
-    /// Sets two bytes to represent the given 
-    /// uint16 value starting att given offsett
-    /// using little endian
-    let setShortValueInMessage (offset:int) (value:uint16) (b:byte[]) =
-        b.[0 + offset] <- value |> byte
-        b.[1 + offset] <- (value >>> 8) |> byte
+    module MessageReader =  
+        /// Reads two bytes in the message starting
+        /// at offset, returning the combines value (little endian)
+        /// as a uint16 value
+        let getShortValueFromMessage (offset:int) (b:byte[]) =
+            // If message is to short to get both bytes
+            // we return None
+            if (b |> Array.length) < (offset + 2) then
+                None 
+            else    
+                Some(((b.[1 + offset] |> uint16) <<< 8) + (b.[0 + offset] |> uint16))
     
-    /// Reads two bytes in the message starting
-    /// at offset, returning the combines value (little endian)
-    /// as a uint16 value
-    let getShortValueFromMessage (offset:int) (b:byte[]) =
-        // If message is to short to get both bytes
-        // we return None
-        if (b |> Array.length) < (offset + 2) then
-            None 
-        else    
-            Some(((b.[1 + offset] |> uint16) <<< 8) + (b.[0 + offset] |> uint16))
+        /// Try to get messagelength form message
+        /// byte array
+        let getMessageLenght (b:byte []) =
+            b |> getShortValueFromMessage 0
 
-    let setMessageLength (b:byte []) =
-        let size = b |> Array.length |> (fun l -> l - 2 ) |> uint16
-        b |> setShortValueInMessage 0 size
-    
-    /// Try to get messagelength form message
-    /// byte array
-    let getMessageLenght (b:byte []) =
-        b |> getShortValueFromMessage 0
+        let getMessageSequenceNumber (b:byte[]) =
+            b |> getShortValueFromMessage 2    
 
-    let setMessageSequenceNumber (messageSequenceNumber:uint16) (b:byte []) =
-        b |> setShortValueInMessage 2 messageSequenceNumber
+        let rec evaulateMessageCompleteness (completeMessages:IncomingWireMessage list) (b:byte[]) =
+           match (b |> getMessageLenght) with
+           | None -> completeMessages, Some(Partial b)
+           | Some l ->
+                match (l + 2us) with
+                // Exact match
+                | len when len  = (b|> Array.length |> uint16) ->
+                    Complete(b) :: completeMessages, None
+                // remaining bytes are less than expected
+                | len when len > (b|> Array.length |> uint16) ->
+                    completeMessages, Some(Partial b)                
+                // Remaining bytes are more than expected
+                // (More than one message)
+                | len when len < (b|> Array.length |> uint16) ->
+                    let (c, rest) = b |> Array.splitAt (len |> int) 
+                    evaulateMessageCompleteness (Complete(c)::completeMessages) rest
+                | _ -> completeMessages, None
 
-    let getMessageSequenceNumber (b:byte[]) =
-        b |> getShortValueFromMessage 2
+    module MessageWriter =
+        let initialize (commandType:CommandType) (writer:BinaryWriter) =
+             //Write message size placeholder
+             writer.Write 0xffffus
+             //Write message sequence placeholder
+             writer.Write 0xffffus
+             //Write command type
+             writer.Write (commandType |> byte)
+             //Write empty variable bits
+             writer.Write 0uy
+             writer.Write 0uy
 
-    let rec evaulateMessageCompleteness (completeMessages:WireMessage list) (b:byte[]) =
-       match (b |> getMessageLenght) with
-       | None -> completeMessages, Some(Partial b)
-       | Some l ->
-            match (l + 2us) with
-            // Exact match
-            | len when len  = (b|> Array.length |> uint16) ->
-                Complete(b) :: completeMessages, None
-            // remaining bytes are less than expected
-            | len when len > (b|> Array.length |> uint16) ->
-                completeMessages, Some(Partial b)                
-            // Remaining bytes are more than expected
-            // (More than one message)
-            | len when len < (b|> Array.length |> uint16) ->
-                let (c, rest) = b |> Array.splitAt (len |> int) 
-                evaulateMessageCompleteness (Complete(c)::completeMessages) rest
-            | _ -> completeMessages, None
-
-
-    type Payload (commandType:CommandType) =
-        let stream = (new MemoryStream())
-        let writer = (new BinaryWriter(stream))
-        do
-            let writeMessageSizePlaceholder () =
-                writer.Write 0xffffus
-            let writeMessageSequencePlaceholder () =
-                writer.Write 0xffffus
-            let writeCommandType () =
-                writer.Write (commandType |> byte)
-            let writeVariableBits () =
-                writer.Write 0uy
-                writer.Write 0uy
-            writeMessageSizePlaceholder ()
-            writeMessageSequencePlaceholder ()
-            writeCommandType ()
-            writeVariableBits ()
-
-        interface IDisposable with
-            member this.Dispose () =
-                writer.Dispose ()
-                stream.Dispose ()
-
-        member __.ToBytes (messageNumber:uint16) =
-            let buffer = stream.ToArray ()
-            buffer |> setMessageLength
-            buffer |> setMessageSequenceNumber messageNumber
-            buffer
-
-        member __.Opcode (o:Opcode) =
+        let writeOpcode (writer:BinaryWriter) (o:Opcode) =
             if o > Opcode.Tst then
                 writer.Write ((o >>> 8) |> byte)
             writer.Write (o |> byte)
-        member __.ByteArg (a:byte) =
+
+        let writeByteArg (writer:BinaryWriter) (a:byte) =
             writer.Write (ArgumentSize.Byte|> byte)
             writer.Write a
 
-        member __.ShortArg (a:uint16) =
+        let writeShortArg (writer:BinaryWriter) (a:uint16) =
             writer.Write (ArgumentSize.Short |> byte)
             writer.Write a
+
+        /// Sets two bytes to represent the given 
+        /// uint16 value starting att given offsett
+        /// using little endian
+        let setShortValueInMessage (offset:int) (value:uint16) (b:byte[]) =
+            b.[0 + offset] <- value |> byte
+            b.[1 + offset] <- (value >>> 8) |> byte
+
+        let setMessageLength (b:byte []) =
+            let size = b |> Array.length |> (fun l -> l - 2 ) |> uint16
+            b |> setShortValueInMessage 0 size
+
+        let setMessageSequenceNumber (messageSequenceNumber:uint16) (b:byte []) =
+            b |> setShortValueInMessage 2 messageSequenceNumber
+
+        let getMessageBytes (stream:System.IO.MemoryStream) =
+            let buffer = stream.ToArray ()
+            buffer |> setMessageLength
+            buffer
+
+    module AudioCommands =  
+        let writePlayTone (writer:BinaryWriter) (Volume vol) (Frequency freq) (Duration dur) =
+            Opcode.SoundTone |> MessageWriter.writeOpcode writer
+            vol |> MessageWriter.writeByteArg writer
+            freq |> MessageWriter.writeShortArg writer 
+            dur |> MessageWriter.writeShortArg writer
+
+    let prepareCommands (commands:Commands list) =
+        let writeCommand (writer:BinaryWriter) = function 
+            | PlayTone (vol, freq, dur) -> AudioCommands.writePlayTone writer vol freq dur
+        
+        use stream = (new MemoryStream ())
+        use writer = (new BinaryWriter (stream))
+
+        writer |> MessageWriter.initialize CommandType.DirectNoReply
+
+        commands 
+        |> List.iter (writeCommand writer)
+        Prepared(Commands commands, (stream |> MessageWriter.getMessageBytes))
+
+    let prepareCommand (command:Commands) =
+        prepareCommands [command]
+
 
     type CoordinatorActions =
     | Send of byte[]
@@ -142,13 +168,13 @@ module Protocol =
             match msg with
             | Send bytes ->
                 let newCount = count |> increaseMessageCount
-                bytes |> setMessageSequenceNumber newCount
+                bytes |> MessageWriter.setMessageSequenceNumber newCount
                 SendActions.Send bytes |> send
                 return! messageloop newCount
         }
         messageloop 0us
     )
-    let receiver (s:System.IO.Stream) (receivedHandler:WireMessage->unit) = MailboxProcessor.Start(fun inbox ->
+    let receiver (s:System.IO.Stream) (receivedHandler:IncomingWireMessage->unit) = MailboxProcessor.Start(fun inbox ->
         let rec messageloop () = async {
             let! msg = inbox.Receive ()
             match msg with
@@ -163,7 +189,7 @@ module Protocol =
                 inbox.Post (CheckReceived (Array.append data (buffer |> Array.take bytesRead)))
                 return! messageloop ()
             | CheckReceived data ->
-                let (complete, partial) =  data |> evaulateMessageCompleteness []
+                let (complete, partial) =  data |> MessageReader.evaulateMessageCompleteness []
                 complete |> List.iter receivedHandler
                 match partial with
                 | Some(Partial d) ->
@@ -193,11 +219,7 @@ module Protocol =
         messageloop ()
     )
 
-    let PlayTone (p:Payload) (PlayTone (Volume (vol), Frequency (freq), Duration (dur))) =
-        p.Opcode Opcode.SoundTone
-        p.ByteArg vol 
-        p.ShortArg freq 
-        p.ShortArg dur 
+    
     
 [<RequireQualifiedAccess>]
 module Bluetooth =
