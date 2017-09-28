@@ -6,11 +6,52 @@ type Volume = Volume of byte
 type Frequency = Frequency of uint16
 type Duration =  Duration of uint16
 
+type InputPortX =
+| Input1
+| Input2
+| Input3
+| Input4
+| InputA
+| InputB
+| InputC
+| InputD
+
+type OutputPortX =
+| All
+| OutputA
+| OutputB
+| OutputC
+| OutputD
+
+/// Devices that can be recognised
+/// as input or outpur devices
+type DeviceTypeX = 
+| NxtTouch
+| NxtLight
+| NxtSound
+| NxtColour
+| NxtUltrasonic 
+| NxtTempterature 
+| LargeMotor
+| MediumMotor
+| Ev3Touch 
+| Ev3Colour
+| Ev3Ultrasonic
+| Ev3Gyroscope
+| Ev3Infrared
+| SensorIsInitializing
+| NoDeviceConnected
+| DeviceConnectedToWrongPort
+| UnknownDevice
+
 type Commands = 
 | PlayTone of Volume * Frequency * Duration
 
 type Queries =
-| GetTypeAndMode of InputPort 
+| GetTypeAndMode of InputPortX list
+
+type Responses =
+| TypeAndMode of (InputPortX * DeviceTypeX * string) list
 
 
 
@@ -28,9 +69,8 @@ module Protocol =
     | Commands of Commands list
     | Queries of (Queries * ResponseOffset * ResponseLength) list
     
-    type OutgoingMessage =
-    | Prepared of OutgoingMessageData * byte []
-    | Sent of OutgoingMessageData * SentSequenceNumber
+    type PreparedMessage = PreparedMessage of OutgoingMessageData * byte []
+    type SentMessage = SentMessage of OutgoingMessageData * SentSequenceNumber
 
     type ActionResult =
     | Success
@@ -146,11 +186,27 @@ module Protocol =
 
         commands 
         |> List.iter (writeCommand writer)
-        Prepared(Commands commands, (stream |> MessageWriter.getMessageBytes))
+        PreparedMessage(Commands commands, (stream |> MessageWriter.getMessageBytes))
 
     let prepareCommand (command:Commands) =
         prepareCommands [command]
 
+    let prepareQueries (queries:Queries list) =
+        let writeQuery (writer:BinaryWriter) (oldOffset:ResponseOffset) = function
+            | GetTypeAndMode port -> (ResponseOffset 1us, ResponseLength 1us)
+        
+        use stream = (new MemoryStream ())
+        use writer = (new BinaryWriter (stream))
+
+        writer |> MessageWriter.initialize CommandType.DirectReply
+        queries
+        |> List.mapFold (fun oldOffset q -> 
+            let ((ResponseOffset offset), (ResponseLength length)) = q |> writeQuery writer oldOffset
+            ((q, ResponseOffset offset, ResponseLength length), ResponseOffset(offset + length))) (ResponseOffset 0us)
+        |> (fun (q, _) -> PreparedMessage(Queries(q), (stream |> MessageWriter.getMessageBytes)))
+
+    let prepareQuery (query:Queries) =
+        prepareQueries [query]
 
     type CoordinatorActions =
     | Send of byte[]
@@ -174,6 +230,7 @@ module Protocol =
         }
         messageloop 0us
     )
+    
     let receiver (s:System.IO.Stream) (receivedHandler:IncomingWireMessage->unit) = MailboxProcessor.Start(fun inbox ->
         let rec messageloop () = async {
             let! msg = inbox.Receive ()
