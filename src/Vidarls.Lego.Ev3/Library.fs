@@ -1,4 +1,4 @@
-namespace Vidarls.Lego
+namespace Vidarls.Lego.Ev3
 open System
 open System.IO
 
@@ -6,78 +6,36 @@ type Volume = Volume of byte
 type Frequency = Frequency of uint16
 type Duration =  Duration of uint16
 
-type InputPortX =
-| Input1
-| Input2
-| Input3
-| Input4
-| InputA
-| InputB
-| InputC
-| InputD
-
-type OutputPortX =
-| All
-| OutputA
-| OutputB
-| OutputC
-| OutputD
-
-/// Devices that can be recognised
-/// as input or outpur devices
-type DeviceTypeX = 
-| NxtTouch
-| NxtLight
-| NxtSound
-| NxtColour
-| NxtUltrasonic 
-| NxtTempterature 
-| LargeMotor
-| MediumMotor
-| Ev3Touch 
-| Ev3Colour
-| Ev3Ultrasonic
-| Ev3Gyroscope
-| Ev3Infrared
-| SensorIsInitializing
-| NoDeviceConnected
-| DeviceConnectedToWrongPort
-| UnknownDevice
-
 type Commands = 
 | PlayTone of Volume * Frequency * Duration
 
-type Queries =
-| GetTypeAndMode of InputPortX list
-
 type Responses =
-| TypeAndMode of (InputPortX * DeviceTypeX * string) list
+| TypeAndMode of (InputPort * DeviceType * string) 
+| Error of Exception
 
-
+type Queries =
+| GetTypeAndMode of InputPort
 
 [<RequireQualifiedAccess>]
 module Protocol =
-    type IncomingWireMessage =
-    | Partial of byte []
-    | Complete of byte []
-
-    type ResponseOffset = ResponseOffset of uint16
-    type ResponseLength = ResponseLength of uint16
+    type Partial = Partial of byte []
+    type Complete = Complete of byte []
     type SentSequenceNumber = SentSequenceNumber of uint16
-
-    type OutgoingMessageData = 
-    | Commands of Commands list
-    | Queries of (Queries * ResponseOffset * ResponseLength) list
-    
-    type PreparedMessage = PreparedMessage of OutgoingMessageData * byte []
-    type SentMessage = SentMessage of OutgoingMessageData * SentSequenceNumber
+     
+    type PreparedCommand = PreparedCommand of byte []
+    type PreparedQuery = PreparedQuery of (byte [] -> Responses) list  * AsyncReplyChannel<Responses list> * byte []
+    type SentQuery = 
+    | QuerySendStarted of (byte [] -> Responses) list * SentSequenceNumber * AsyncReplyChannel<Responses list>
+    | QuerySendConfirmed of (byte [] -> Responses) list * SentSequenceNumber * AsyncReplyChannel<Responses list>
+    | QuerySendFailed of (byte [] -> Responses) list * SentSequenceNumber * AsyncReplyChannel<Responses list>
+    | QueryCompleted
 
     type ActionResult =
     | Success
     | Failure of Exception
     
     type SendActions = 
-    | Send of byte[]
+    | Send of byte[] * SentSequenceNumber
     | Die of AsyncReplyChannel<ActionResult>
 
     type ReceiveActions =
@@ -106,7 +64,7 @@ module Protocol =
         let getMessageSequenceNumber (b:byte[]) =
             b |> getShortValueFromMessage 2    
 
-        let rec evaulateMessageCompleteness (completeMessages:IncomingWireMessage list) (b:byte[]) =
+        let rec evaulateMessageCompleteness (completeMessages:Complete list) (b:byte[]) =
            match (b |> getMessageLenght) with
            | None -> completeMessages, Some(Partial b)
            | Some l ->
@@ -141,6 +99,10 @@ module Protocol =
                 writer.Write ((o >>> 8) |> byte)
             writer.Write (o |> byte)
 
+        let writeGlobalIndex (writer:BinaryWriter) (index:byte) =
+            writer.Write 0xe1uy
+            writer.Write index
+
         let writeByteArg (writer:BinaryWriter) (a:byte) =
             writer.Write (ArgumentSize.Byte|> byte)
             writer.Write a
@@ -163,6 +125,13 @@ module Protocol =
         let setMessageSequenceNumber (messageSequenceNumber:uint16) (b:byte []) =
             b |> setShortValueInMessage 2 messageSequenceNumber
 
+        let setGlobalIndexSize (size:uint16) (bytes:byte []) =
+            if (bytes |> Array.length) < 7 then failwith "incomplete message"
+            if size > 1024us then failwith "Size must be 1024 or less"
+            bytes.[5] <- size |> byte //lowe bits of global size
+            bytes.[6] <- (0uy ||| ((size >>> 8) |> byte) &&& 0x03uy) // lower bits of global size 
+            bytes
+
         let getMessageBytes (stream:System.IO.MemoryStream) =
             let buffer = stream.ToArray ()
             buffer |> setMessageLength
@@ -175,6 +144,25 @@ module Protocol =
             freq |> MessageWriter.writeShortArg writer 
             dur |> MessageWriter.writeShortArg writer
 
+    module Queries =
+        let getTypeAndModeResponse input initialOffset (bytes:byte[]) =            
+            (TypeAndMode (
+                input, 
+                (bytes.[initialOffset] |> int |> enum<DeviceType>), 
+                (sprintf "%A" bytes.[initialOffset + 1])))
+
+        let writeTypeAndModeRequest input (offset:byte) (writer:BinaryWriter) =
+            Opcode.InputDeviceGetTypeMode |> MessageWriter.writeOpcode writer
+            0x00uy |> MessageWriter.writeByteArg writer // layer 0
+            input |> byte |> MessageWriter.writeByteArg writer
+            offset |> MessageWriter.writeGlobalIndex writer
+            (offset + 1uy) |> MessageWriter.writeGlobalIndex writer
+
+        let prepareTypeAndModeRequest (i:uint16) input =
+            (getTypeAndModeResponse input (i |> int)),
+            (writeTypeAndModeRequest input (i |> byte)),
+            2us
+
     let prepareCommands (commands:Commands list) =
         let writeCommand (writer:BinaryWriter) = function 
             | PlayTone (vol, freq, dur) -> AudioCommands.writePlayTone writer vol freq dur
@@ -186,35 +174,49 @@ module Protocol =
 
         commands 
         |> List.iter (writeCommand writer)
-        PreparedMessage(Commands commands, (stream |> MessageWriter.getMessageBytes))
+        PreparedCommand(stream |> MessageWriter.getMessageBytes)
 
     let prepareCommand (command:Commands) =
         prepareCommands [command]
 
-    let prepareQueries (queries:Queries list) =
-        let writeQuery (writer:BinaryWriter) (oldOffset:ResponseOffset) = function
-            | GetTypeAndMode port -> (ResponseOffset 1us, ResponseLength 1us)
-        
-        use stream = (new MemoryStream ())
-        use writer = (new BinaryWriter (stream))
 
-        writer |> MessageWriter.initialize CommandType.DirectReply
-        queries
-        |> List.mapFold (fun oldOffset q -> 
-            let ((ResponseOffset offset), (ResponseLength length)) = q |> writeQuery writer oldOffset
-            ((q, ResponseOffset offset, ResponseLength length), ResponseOffset(offset + length))) (ResponseOffset 0us)
-        |> (fun (q, _) -> PreparedMessage(Queries(q), (stream |> MessageWriter.getMessageBytes)))
+    let prepareQueries (queries:Queries list) (reply:AsyncReplyChannel<Responses list>) =
+        let prepare i = function
+        | GetTypeAndMode input -> Queries.prepareTypeAndModeRequest i input
+
+        let write writers =       
+            use stream = (new MemoryStream ())
+            use writer = (new BinaryWriter (stream))
+            writer |> MessageWriter.initialize CommandType.DirectReply
+            writers |> List.iter (fun w -> w writer)
+            stream |> MessageWriter.getMessageBytes
+
+        let (getResponses, bytes, length) =
+            queries
+            |> List.mapFold 
+                (fun i q ->
+                    let getResponses, writeRequest, length = prepare i q
+                    ((getResponses, writeRequest), i + length)) 0us
+            |> (fun (lists, length) -> 
+                    let getResponses, writeRequests = lists |> List.unzip
+                    (getResponses, writeRequests |> write, length))
+        PreparedQuery(getResponses, reply, (bytes |> MessageWriter.setGlobalIndexSize length))
 
     let prepareQuery (query:Queries) =
         prepareQueries [query]
 
     type CoordinatorActions =
-    | Send of byte[]
+    | SendCommands of Commands list
+    | SendQueries of Queries list * AsyncReplyChannel<Responses list>
+    | ConfirmSentQueries of SentSequenceNumber
+    | SendFailed of SentSequenceNumber * Exception
+    | Received of Complete
 
-    let coordinator (send:SendActions->unit) replyReceived = MailboxProcessor.Start(fun inbox -> 
-        let bufferSize = 2048
+    let coordinator (send:SendActions->unit) = MailboxProcessor.Start(fun inbox -> 
+        let bufferSize = System.UInt16.MaxValue
+        let buffer = Array.zeroCreate (bufferSize |> int)
         let rec increaseMessageCount count =
-            if count = System.UInt16.MaxValue then 
+            if count = bufferSize then 
                 increaseMessageCount 0us
             else
                 count + 1us
@@ -222,22 +224,53 @@ module Protocol =
         let rec messageloop count = async {
             let! msg = inbox.Receive ()
             match msg with
-            | Send bytes ->
+            | SendCommands commands ->
+                let (PreparedCommand bytes) = prepareCommands commands
                 let newCount = count |> increaseMessageCount
                 bytes |> MessageWriter.setMessageSequenceNumber newCount
-                SendActions.Send bytes |> send
+                SendActions.Send (bytes, SentSequenceNumber newCount) |> send
                 return! messageloop newCount
+            | SendQueries (queries, reply) ->
+                let (PreparedQuery (readers, reply, bytes)) = prepareQueries queries reply
+                let newCount = count |> increaseMessageCount
+                bytes |> MessageWriter.setMessageSequenceNumber newCount
+                buffer.[newCount |> int] <- QuerySendStarted (readers, SentSequenceNumber newCount, reply)  
+                SendActions.Send (bytes, SentSequenceNumber newCount) |> send
+                return! messageloop newCount
+            | ConfirmSentQueries (SentSequenceNumber numb) ->
+                buffer.[numb |> int] |> function
+                | QuerySendStarted (readers, seq, repl) -> buffer.[numb |> int] <- QuerySendConfirmed (readers, seq, repl)
+                | _ -> ()
+                return! messageloop count
+            | SendFailed (SentSequenceNumber numb, ex) -> 
+                buffer.[numb |> int] |> function
+                | QuerySendStarted (message, seq, repl) -> 
+                    buffer.[numb |> int] <- QuerySendFailed (message, seq, repl)
+                    repl.Reply ([Error ex])
+                | _ -> ()
+                return! messageloop count
+            | Received(Complete bytes) ->
+                bytes |> MessageReader.getMessageSequenceNumber |> function
+                | None -> () // TODO log warning
+                | Some (seq) -> 
+                    buffer.[seq |> int] |> function
+                    | QuerySendStarted (readers, _, repl) | QuerySendConfirmed (readers, _, repl) ->  
+                        let bytes = bytes |> Array.skip 5                       
+                        readers |> List.map (fun read -> read bytes) |> repl.Reply
+                        buffer.[seq |> int] <- QueryCompleted
+                    | _ -> () //TODO log warning
+                return! messageloop count
         }
         messageloop 0us
     )
     
-    let receiver (s:System.IO.Stream) (receivedHandler:IncomingWireMessage->unit) = MailboxProcessor.Start(fun inbox ->
+    let receiver (s:System.IO.Stream) receivedHandler = MailboxProcessor.Start(fun inbox ->
         let rec messageloop () = async {
             let! msg = inbox.Receive ()
             match msg with
-            | StartReceive ->
+            | StartReceive ->                
                 let buffer = Array.zeroCreate 1024
-                let! bytesRead = s.AsyncRead buffer
+                let! bytesRead = s.AsyncRead buffer               
                 inbox.Post (CheckReceived (buffer |> Array.take bytesRead))
                 return! messageloop ()
             | ContinueReceive data ->
@@ -266,7 +299,7 @@ module Protocol =
         let rec messageloop () = async {
             let! msg = inbox.Receive ()
             match msg with
-            | SendActions.Send bytes -> 
+            | SendActions.Send (bytes, seq) ->               
                 do! s.AsyncWrite bytes
                 return! messageloop ()
             | SendActions.Die channel ->
@@ -276,87 +309,44 @@ module Protocol =
         messageloop ()
     )
 
+type Brick private (stream, disposePort) =
+    let sender = Protocol.sender stream
+    let coord = Protocol.coordinator sender.Post 
+    let receiver = Protocol.receiver stream (Protocol.Received >> coord.Post)
+    do Protocol.StartReceive |> receiver.Post
     
-    
-[<RequireQualifiedAccess>]
-module Bluetooth =
+    let toQuery queries =
+        (fun replyChannel -> Protocol.SendQueries(queries, replyChannel))
 
-    type Message =
-    | Connect of AsyncReplyChannel<Protocol.ActionResult>
-    | Disconnect of AsyncReplyChannel<Protocol.ActionResult>
-    | Send of byte []
+    member __.DirectQuery queries =
+        coord.PostAndReply ((queries |> toQuery))
 
+    member __.DirectCommand commands =
+        commands |> Protocol.SendCommands |> coord.Post
 
-    let connection (comport:string) = MailboxProcessor.Start(fun inbox ->
+    interface IDisposable with
+        member __.Dispose () =
+            (receiver :> IDisposable).Dispose ()
+            (coord :> IDisposable).Dispose ()
+            (sender :> IDisposable).Dispose ()
+            disposePort ()
+            
+    static member CreateWithBluetoothConnection comPort =
+        let availableComPports = Ports.SerialPort.GetPortNames ()
+        let comPortIsValid =
+            availableComPports
+            |> Array.exists (fun p -> String.Equals(p, comPort, StringComparison.InvariantCultureIgnoreCase))
+        if not comPortIsValid then failwith (sprintf "Selected com port: %s is not valid, must be one of %A" comPort availableComPports)
+        let port = (new Ports.SerialPort(comPort, 115200))
+        port.DataReceived.Add (fun d -> printfn "DR: %A" d)
+        do port.Open ()
         
-        let rec messageLoop port = async{
-            let! msg = inbox.Receive()
-            match msg, port with
-            | Connect channel, None-> 
-                try
-                    let p = (new System.IO.Ports.SerialPort(comport, 115200))                    
-                    p.Open ()                    
-                    channel.Reply Protocol.ActionResult.Success
-                    return! messageLoop (Some p)
-                with 
-                | ex -> 
-                    channel.Reply (Protocol.ActionResult.Failure ex)
-                    return ()
-            | Connect channel, Some connection->
-                channel.Reply Protocol.ActionResult.Success
-                return! messageLoop (Some connection)
-            | Disconnect channel, Some connection -> 
-                try
-                    connection.Close ()
-                    connection.Dispose ()
-                    channel.Reply Protocol.ActionResult.Success
-                    return! messageLoop None
-                with
-                | ex -> 
-                    channel.Reply (Protocol.ActionResult.Failure ex)
-                    return ()
-            | Disconnect channel, None -> 
-                channel.Reply Protocol.ActionResult.Success
-                return! messageLoop None
-            | Send bytes, Some connection ->
-                connection.Write (bytes,0,(bytes |> Array.length))
-                return! messageLoop (Some connection)
-            | Send bytes, None -> return! messageLoop None
+        new Brick(port.BaseStream, port.Dispose)
 
-
-            return! messageLoop None
-        }
-        messageLoop None
-    ) 
-
-    let x = connection ""
-    let xx = x.PostAndReply Connect
-
-module Ev3 =
-    let runTest () =
-        // use p = (new Protocol.Payload(CommandType.DirectNoReply))
-        // PlayTone(Volume 100uy, Frequency 1000us, Duration 1000us)
-        // |> Protocol.PlayTone p
-        // let btconn = Bluetooth.connection "COM4"
-        // let connected = Bluetooth.Message.Connect |> btconn.PostAndReply
-        // match connected with
-        // | Bluetooth.ConnectionResult.Success -> printfn "YAY connected"
-        // | Bluetooth.ConnectionResult.Failure ex -> raise ex
-        // (Bluetooth.Message.Send (p.ToBytes(1us))) |> btconn.Post
-        // let disconnected = Bluetooth.Message.Disconnect |> btconn.PostAndReply
-        // match disconnected with
-        // | Bluetooth.ConnectionResult.Success -> printfn "YAY disconnected"
-        // | Bluetooth.ConnectionResult.Failure ex -> raise ex
-
-        let com = (new System.IO.Ports.SerialPort("COM1", 115200))
-        com.Open ()
-        let com2 = (new System.IO.Ports.SerialPort("COM2", 115200))
-        com2.Open ()
-        let receiver = Protocol.receiver com.BaseStream ignore
-        receiver.Post Protocol.ReceiveActions.StartReceive
-        com2.Write("Hello world")
-        System.Threading.Thread.Sleep 1000
-        com2.Write "Hello again"
+    static member CreateFromStream stream =
+        new Brick(stream, id)
+        
+       
 
 
     

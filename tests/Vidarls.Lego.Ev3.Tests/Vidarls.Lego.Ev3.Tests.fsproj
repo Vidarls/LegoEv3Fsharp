@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Fsunit.xunit" Version="3.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.3.0-preview-20170628-02" />
+    <PackageReference Include="Nerdbank.Fullduplexstream" Version="1.0.9" />
     <PackageReference Include="xunit" Version="2.2.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.2.0" />
   </ItemGroup>

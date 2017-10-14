@@ -1,4 +1,4 @@
-namespace Vidarls.Lego
+namespace Vidarls.Lego.Ev3
 open System
 
 type  ArgumentSize =
