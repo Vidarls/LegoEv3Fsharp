@@ -1,10 +1,13 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Enums.fs" />
-    <Compile Include="Library.fs" />
+    <Compile Include="MessageWriter.fs" />
+    <Compile Include="CommandsAndQueries.fs" />
+    <Compile Include="Protocol.fs" />
+    <Compile Include="Brick.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="4.4.0" />

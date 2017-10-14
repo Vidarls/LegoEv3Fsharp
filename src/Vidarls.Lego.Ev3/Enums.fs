@@ -214,7 +214,7 @@ type NxtTemperatureMode =
 | Celsius = 0x00
 | Fahrenheit = 0x01
 
-type MoroMode =
+type MotorMode =
 | Degrees = 0x00
 | Rotations = 0x01
 | Percent = 0x02
