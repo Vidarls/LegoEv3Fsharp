@@ -28,13 +28,27 @@ Only bluetooth connection is supported.
 
 Probably only supports Windows desktop. (`System.IO.Serialport` used for bluetooth communication is in netstandard 2.0, but I am not sure other platforms are abstracting bluetooth with serialport in the same way)
 
-Only supports one query and one command:
+Only supports one query and four commands:
 
 Play tone:
 
 ```F#
 use brick = Brick.CreateWithBluetoothConnection "COM4"
 [PlayTone (Volume 100uy, Frequency 1000us, Duration 300us)]
+|> brick.DirectCommand
+```
+
+```F#
+use brick = Brick.CreateWithBluetoothConnection "COM4"
+[ SetMotorSpeed ([OutputPort.B; OutputPort.C], Speed 100y); StartMotor [OutputPort.B; OutputPort.C]]
+|> brick.DirectCommand
+printfn "Press enter to turn"
+System.Console.ReadLine () |> ignore
+[ SetMotorSpeed ([OutputPort.B], Speed -100y); ]
+|> brick.DirectCommand
+printfn "Press enter to stop"
+System.Console.ReadLine () |> ignore
+[ StopMotor ([OutputPort.B; OutputPort.C], BrakeSetting.Coast) ]
 |> brick.DirectCommand
 ```
 

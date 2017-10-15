@@ -135,6 +135,10 @@ type OutputPort =
 | D = 0x08
 | ALL = 0x0f
 
+type BrakeSetting =
+| Brake = 0x01
+| Coast = 0x00
+
 /// Devices that can be recognised
 /// as input or outpur devices
 type DeviceType = 

@@ -6,6 +6,8 @@ namespace Vidarls.Lego.Ev3
 open System
 open MessageWriter
 
+type Speed = Speed of sbyte
+
 // Types used in command and query definitions
 // These are the types uses will be interacting
 // directly with
@@ -16,6 +18,9 @@ type Duration =  Duration of uint16
 /// Suppported commmands
 type Commands = 
 | PlayTone of Volume * Frequency * Duration
+| SetMotorSpeed of OutputPort list * Speed
+| StartMotor of OutputPort list
+| StopMotor of OutputPort list * BrakeSetting
 
 /// Supported device modes
 /// Unification of all XXmode enums in
@@ -62,12 +67,38 @@ module Commands =
               addShortArg freq  
               addShortArg dur ]
 
+    module Motor =
+        let setSpeed (outputs:OutputPort list) (Speed speed) =
+            [ addOpode Opcode.OutputSpeed
+              layer0
+              addOutputPorts outputs
+              addSignedByteArg speed              
+              ]
+
+        let startMotor (outputs:OutputPort list) =
+            [ addOpode Opcode.OutputStart
+              layer0
+              addOutputPorts outputs
+              ]
+
+        let stopMotor (outputs:OutputPort list) (brakeSetting:BrakeSetting) =
+            [ addOpode Opcode.OutputStop
+              layer0
+              addOutputPorts outputs
+              addBrakeSetting brakeSetting]
+
 
     /// Function for mapping between command types
     /// and command to binary transformation function
     let getCommandContent = function
         | PlayTone (vol, freq, dur) -> 
-                Audio.playToneCommandContent vol freq dur
+            Audio.playToneCommandContent vol freq dur
+        | SetMotorSpeed (outputs, speed) ->
+            Motor.setSpeed outputs speed
+        | StartMotor outputs ->
+            Motor.startMotor outputs
+        | StopMotor (outputs, brakeSetting) ->
+            Motor.stopMotor outputs brakeSetting
 
 /// Query defintions
 /// Defines how a query given in the 
@@ -112,7 +143,7 @@ module Queries =
 
         let typeAndModeRequestContent input (offset:byte) =
             [ addOpode Opcode.InputDeviceGetTypeMode 
-              addByteArg 0x00uy  // layer 0
+              layer0
               addByteArg (input |> byte) 
               addGlobalIndex offset // Global var index for device type response, corresponds to index in response byte array in parser
               addGlobalIndex (offset + 1uy) ] // Global var index for mode response, corresponds to index in response byte array in parser
