@@ -10,7 +10,7 @@ No nuget package is release yet. Needs a bit more features before it will be pub
 
 To use now, build it or just clone it at add a project reference.
 
-For connections, only bluetooth connections is supported for now. [Here is some ok docs for the pairing process](https://se.mathworks.com/help/supportpkg/legomindstormsev3io/ug/connect-to-an-ev3-brick-over-bluetooth-using-windows-1.html)
+For connections, only bluetooth connections is supported for now. [Here are some ok docs for the pairing process](https://se.mathworks.com/help/supportpkg/legomindstormsev3io/ug/connect-to-an-ev3-brick-over-bluetooth-using-windows-1.html)
 
 ## Status
 
