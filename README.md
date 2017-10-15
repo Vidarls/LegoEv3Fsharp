@@ -42,7 +42,7 @@ use brick = Brick.CreateWithBluetoothConnection "COM4"
  // [TypeAndMode (B, LargeMotor, MotorMode Degrees)]
  ```
 
- ### Adding support for more commands and queryes
+ ### Adding support for more commands and queries
 
  I am planning to implement support for the basic commands and queries 
  requried to make useful robots with the devices included in the basic
