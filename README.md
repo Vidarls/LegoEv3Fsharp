@@ -4,6 +4,12 @@ Dotnet core - Netstandard 2.0 F# API to interact with a Lego mindstorms EV3 bric
 
 Started as a port of Brian Peeks C# implementation (https://github.com/BrianPeek/legoev3). But implementation has diverged quite a bit. Still heavily inspired by Brians work.
 
+## Goal
+
+My goal is to make a library that makes it as easy and non-technical as possible to create useful and fun robots with the Lego Mindstorms EV3 kit using a proper programming language. I hope that it can be used to get kids into enjoying programming, by making it easy to *make stuff happen*
+
+I want to avoid leaking unnecesary technical details of the underlaying protocols, keeping the programming model focused on what you want to do. I hope to achieve this by leveraging the rich F# type system to represent concepts that are easy to understand, and easy to get right.
+
 ## Usage
 
 No nuget package is release yet. Needs a bit more features before it will be published.
@@ -19,6 +25,8 @@ Work is still very much in progress. But most hard parts are done.
 ### Supported functions
 
 Only bluetooth connection is supported.
+
+Probably only supports Windows desktop. (`System.IO.Serialport` used for bluetooth communication is in netstandard 2.0, but I am not sure other platforms are abstracting bluetooth with serialport in the same way)
 
 Only supports one query and one command:
 
@@ -51,6 +59,17 @@ use brick = Brick.CreateWithBluetoothConnection "COM4"
  Adding new commands and queries is quite straight forward
 
  See comments and imlementation example in [CommandsAndQueries.fs](https://github.com/Vidarls/LegoEv3Fsharp/blob/master/src/Vidarls.Lego.Ev3/CommandsAndQueries.fs) for details on what is required to add more.
+
+ ### Programming model
+
+ Exactly how to interact with the EV3 is still not decided. I probably need some time play-testing it to figure out how the best approach is.
+
+ Currently only two API methods are implemented:
+
+ 1. `Brick.DirectQuery` for blocking queries to get sensor / output statuses
+ 2. `Brick.DirectCommand` for sending commands to the EV3
+
+ This is probably enough (and simple enough) for a lot of kid type projects. Where it falls short will be clear once I (or others) starts using it.
 
  ## Build and test
 
