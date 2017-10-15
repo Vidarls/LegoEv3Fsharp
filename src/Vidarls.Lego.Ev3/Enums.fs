@@ -1,3 +1,8 @@
+// Enum representations of various
+// values used in the Lego EV3 binary protocol
+//
+// Direct port of Brian Peeks C# implementation:
+// https://github.com/BrianPeek/legoev3/blob/master/Lego.Ev3.Core/Enums.cs
 namespace Vidarls.Lego.Ev3
 open System
 
